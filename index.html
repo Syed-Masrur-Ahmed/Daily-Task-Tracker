@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Task Tracker (Frontend-Only)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .task-card {
+            transition: all 0.3s ease;
+        }
+        .task-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .progress-bar-bg {
+            background-color: #374151; /* gray-700 */
+        }
+        .progress-bar-fg {
+            background-color: #4ade80; /* green-400 */
+            transition: width 0.5s ease-in-out;
+        }
+        .completed .progress-bar-fg {
+            background-color: #22c55e; /* green-500 */
+        }
+        .completed .task-title {
+            text-decoration: line-through;
+            color: #6b7280; /* gray-500 */
+        }
+        .timer-active {
+            color: #f87171; /* red-400 */
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; /* gray-800 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; /* gray-600 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; /* gray-500 */
+        }
+        .pokemon-icon {
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.25));
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-3xl">
+        <header class="text-center mb-8">
+            <img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/143.svg" class="h-20 w-20 inline-block pokemon-icon" alt="Snorlax icon">
+            <h1 class="text-4xl font-bold text-white mt-2">Daily Grind</h1>
+            <p class="text-gray-400 mt-2">Your daily tasks reset at midnight. Stay productive!</p>
+        </header>
+
+        <main>
+            <!-- Add Task Form -->
+            <div class="bg-gray-800 p-6 rounded-lg shadow-md mb-8 border border-gray-700">
+                <h2 class="text-2xl font-semibold mb-4 text-white">Add New Task</h2>
+                <form id="add-task-form" class="flex flex-col sm:flex-row gap-4">
+                    <input type="text" id="task-name" placeholder="Task name (e.g., 'Workout')" class="flex-grow p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                    <input type="number" id="task-duration" placeholder="Duration (minutes)" class="w-full sm:w-48 p-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                    <button type="submit" class="bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-indigo-700 transition-colors">
+                        <i class="fas fa-plus mr-2"></i>Add Task
+                    </button>
+                </form>
+            </div>
+
+            <!-- Task List -->
+            <div id="task-list" class="space-y-4">
+                <!-- Task items will be injected here by JavaScript -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal for confirmation -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center hidden">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-xl max-w-sm w-full border border-gray-700">
+            <h3 class="text-xl font-bold mb-4 text-white" id="modal-title">Confirm Action</h3>
+            <p id="modal-body" class="text-gray-300">Are you sure you want to proceed?</p>
+            <div class="mt-6 flex justify-end space-x-4">
+                <button id="modal-cancel" class="px-4 py-2 bg-gray-600 text-gray-200 rounded-lg hover:bg-gray-500 transition-colors">Cancel</button>
+                <button id="modal-confirm" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- State Management ---
+            let tasks = [];
+            let activeTimerInterval = null;
+            let currentTimedTaskId = null;
+
+            const TASKS_STORAGE_KEY = 'dailyTasks';
+            const LAST_RESET_STORAGE_KEY = 'dailyTasksLastReset';
+
+            // --- Core Functions ---
+            function loadTasks() {
+                const tasksJSON = localStorage.getItem(TASKS_STORAGE_KEY);
+                tasks = tasksJSON ? JSON.parse(tasksJSON) : [];
+                checkForDailyReset();
+                renderTasks();
+            }
+
+            function saveTasks() {
+                localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+            }
+            
+            function checkForDailyReset() {
+                const lastResetDate = localStorage.getItem(LAST_RESET_STORAGE_KEY);
+                const today = new Date().toDateString();
+
+                if (lastResetDate !== today) {
+                    tasks.forEach(task => {
+                        task.timeSpent = 0;
+                        task.completed = false;
+                    });
+                    localStorage.setItem(LAST_RESET_STORAGE_KEY, today);
+                    saveTasks();
+                }
+            }
+
+            function renderTasks() {
+                const taskList = document.getElementById('task-list');
+                taskList.innerHTML = '';
+
+                if (tasks.length === 0) {
+                    taskList.innerHTML = `<p class="text-center text-gray-500 py-8">No tasks yet. Gotta catch 'em all!</p>`;
+                    return;
+                }
+
+                tasks.sort((a, b) => {
+                    if (a.completed !== b.completed) {
+                        return a.completed ? 1 : -1;
+                    }
+                    return a.createdAt - b.createdAt;
+                });
+
+                tasks.forEach(task => {
+                    const taskElement = document.createElement('div');
+                    taskElement.className = `task-card bg-gray-800 border border-gray-700 p-5 rounded-lg shadow-md flex items-center gap-5 ${task.completed ? 'completed opacity-60' : ''}`;
+                    taskElement.dataset.id = task.id;
+
+                    const durationInSeconds = task.duration * 60;
+                    const progress = durationInSeconds > 0 ? Math.min((task.timeSpent / durationInSeconds) * 100, 100) : 0;
+                    const isTimerRunning = currentTimedTaskId === task.id;
+                    const pokemonId = task.pokemonId || 25;
+
+                    taskElement.innerHTML = `
+                        <div class="flex-shrink-0">
+                            <img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/dream-world/${pokemonId}.svg" 
+                                 class="w-20 h-20 pokemon-icon" 
+                                 alt="Pokemon" 
+                                 onerror="this.onerror=null;this.src='https://placehold.co/80x80/374151/9ca3af?text=?';">
+                        </div>
+                        <div class="flex-grow flex flex-col gap-3 w-full min-w-0">
+                            <div class="flex justify-between items-start gap-2">
+                                <div class="flex-grow min-w-0">
+                                    <h3 class="task-title text-xl font-semibold text-gray-100 truncate">${task.name}</h3>
+                                    <p class="text-sm text-gray-400">Target: ${task.duration} min | Today: ${formatTime(task.timeSpent)}</p>
+                                </div>
+                                <div class="flex items-center flex-shrink-0 gap-3">
+                                    <button class="complete-btn text-gray-500 hover:text-green-400 disabled:opacity-50" ${task.completed ? 'disabled' : ''} title="Mark as complete">
+                                        <i class="fas fa-check-circle fa-lg"></i>
+                                    </button>
+                                    <button class="delete-btn text-gray-500 hover:text-red-500" title="Delete task">
+                                        <i class="fas fa-trash-alt fa-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="progress-bar-bg w-full h-2.5 rounded-full">
+                                    <div class="progress-bar-fg h-2.5 rounded-full" style="width: ${progress}%"></div>
+                                </div>
+                            </div>
+                            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mt-1">
+                                <div class="timer-display text-2xl font-mono ${isTimerRunning ? 'timer-active' : ''}">${formatTime(task.timeSpent)}</div>
+                                <button class="timer-toggle-btn w-full sm:w-auto px-6 py-2 rounded-lg font-semibold transition-colors ${isTimerRunning ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'}" ${task.completed ? 'disabled' : ''}>
+                                    <i class="fas ${isTimerRunning ? 'fa-pause' : 'fa-play'} mr-2"></i>${isTimerRunning ? 'Stop' : 'Start'}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    taskList.appendChild(taskElement);
+                });
+            }
+
+            // --- Event Listeners ---
+            document.getElementById('add-task-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const nameInput = document.getElementById('task-name');
+                const durationInput = document.getElementById('task-duration');
+
+                const newTask = {
+                    id: Date.now(), // Simple unique ID
+                    name: nameInput.value,
+                    duration: parseInt(durationInput.value, 10),
+                    timeSpent: 0,
+                    completed: false,
+                    pokemonId: Math.floor(Math.random() * 151) + 1,
+                    createdAt: Date.now()
+                };
+
+                tasks.push(newTask);
+                saveTasks();
+                renderTasks();
+                nameInput.value = '';
+                durationInput.value = '';
+            });
+
+            document.getElementById('task-list').addEventListener('click', (e) => {
+                const taskCard = e.target.closest('.task-card');
+                if (!taskCard) return;
+
+                const taskId = parseInt(taskCard.dataset.id, 10);
+                const task = tasks.find(t => t.id === taskId);
+                if (!task) return;
+
+                if (e.target.closest('.delete-btn')) {
+                    showConfirmationModal(
+                        'Delete Task?',
+                        'This action cannot be undone.',
+                        () => {
+                            if (currentTimedTaskId === taskId) {
+                                stopTimer();
+                            }
+                            tasks = tasks.filter(t => t.id !== taskId);
+                            saveTasks();
+                            renderTasks();
+                        }
+                    );
+                } else if (e.target.closest('.complete-btn')) {
+                    task.completed = true;
+                    if (currentTimedTaskId === taskId) {
+                        stopTimer();
+                    }
+                    saveTasks();
+                    renderTasks();
+                } else if (e.target.closest('.timer-toggle-btn')) {
+                    toggleTimer(taskId);
+                }
+            });
+
+            // --- Timer Logic ---
+            function toggleTimer(taskId) {
+                if (currentTimedTaskId === taskId) {
+                    stopTimer();
+                } else {
+                    if (currentTimedTaskId !== null) {
+                        stopTimer(); // Stop any other running timer
+                    }
+                    startTimer(taskId);
+                }
+            }
+
+            function startTimer(taskId) {
+                const task = tasks.find(t => t.id === taskId);
+                if (!task || task.completed) return;
+
+                currentTimedTaskId = taskId;
+                renderTasks(); // Re-render to show active state
+
+                activeTimerInterval = setInterval(() => {
+                    const currentTask = tasks.find(t => t.id === currentTimedTaskId);
+                    if (!currentTask) {
+                        stopTimer();
+                        return;
+                    }
+                    currentTask.timeSpent += 1;
+                    
+                    const timerDisplay = document.querySelector(`[data-id="${currentTask.id}"] .timer-display`);
+                    if (timerDisplay) {
+                        timerDisplay.textContent = formatTime(currentTask.timeSpent);
+                    }
+
+                    if (currentTask.timeSpent % 5 === 0) {
+                        saveTasks();
+                    }
+                }, 1000);
+            }
+
+            function stopTimer() {
+                clearInterval(activeTimerInterval);
+                activeTimerInterval = null;
+                
+                if (currentTimedTaskId !== null) {
+                    saveTasks();
+                    currentTimedTaskId = null;
+                    renderTasks(); 
+                }
+            }
+
+            // --- Utility Functions ---
+            function formatTime(totalSeconds) {
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+                const parts = [];
+                if (hours > 0) parts.push(String(hours).padStart(2, '0'));
+                parts.push(String(minutes).padStart(2, '0'));
+                parts.push(String(seconds).padStart(2, '0'));
+                return parts.join(":");
+            }
+
+            // --- Modal Logic ---
+            const modal = document.getElementById('confirmation-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalConfirm = document.getElementById('modal-confirm');
+            const modalCancel = document.getElementById('modal-cancel');
+            let confirmCallback = null;
+
+            function showConfirmationModal(title, body, onConfirm) {
+                modalTitle.textContent = title;
+                modalBody.textContent = body;
+                confirmCallback = onConfirm;
+                modal.classList.remove('hidden');
+            }
+
+            function hideModal() {
+                modal.classList.add('hidden');
+                confirmCallback = null;
+            }
+
+            modalConfirm.addEventListener('click', () => {
+                if (confirmCallback) {
+                    confirmCallback();
+                }
+                hideModal();
+            });
+
+            modalCancel.addEventListener('click', hideModal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    hideModal();
+                }
+            });
+
+            // --- Initial Load ---
+            loadTasks();
+        });
+    </script>
+</body>
+</html>
+
